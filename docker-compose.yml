@@ -1,22 +1,19 @@
-version: "3"
+version: "3.2"
 services:
-  nest:
-    container_name: nest
-    build: .
+  redis:
+    image: "redis:alpine"
+    command: redis-server --requirepass password
     ports:
-      - "9001:9001"
-    volumes:
-      - .:/app
-    links:
-      - mongo
-  mongo:
-    image: mongo:latest
-    container_name: mongo
-    ports:
-      - "80:80"
+     - "6379:6379"
+
     environment:
-      MONGO_INITDB_DATABASE: nest
-    volumes:
-      - data-volume:/data/db
-volumes:
-  data-volume:
+     - REDIS_REPLICATION_MODE=master
+
+  mongodb:
+    image: mongo:latest
+    restart: always
+    ports:
+      - 27017:27017
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=root

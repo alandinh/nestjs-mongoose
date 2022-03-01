@@ -1,102 +1,81 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import { ConfigService } from "../config/config.service";
-import { ProfileService } from "../profile/profile.service";
-import { IProfile } from "../profile/profile.model";
-import { LoginPayload } from "./payload/login.payload";
+import { UsersService } from "../users/users.service";
+import { AuthMessage } from "./constants/auth-message.enum";
+import { TokenTypes } from "./constants/token.constant";
+import { EmailLoginDto } from "./dto/email-login.dto";
+import { EmailRegisterDto } from "./dto/email-register.dto";
+import {
+  ResponseLogOutDto,
+  ResponseRefreshTokenDto,
+} from "./dto/refresh-token.dto";
+import { TokensService } from "./token.service";
 
-/**
- * Models a typical Login/Register route return body
- */
-export interface ITokenReturnBody {
-  /**
-   * When the token is to expire in seconds
-   */
-  expires: string;
-  /**
-   * A human-readable format of expires
-   */
-  expiresPrettyPrint: string;
-  /**
-   * The Bearer token
-   */
-  token: string;
-}
-
-/**
- * Authentication Service
- */
 @Injectable()
 export class AuthService {
-  /**
-   * Time in seconds when the token is to expire
-   * @type {string}
-   */
-  private readonly expiration: string;
-
-  /**
-   * Constructor
-   * @param {JwtService} jwtService jwt service
-   * @param {ConfigService} configService
-   * @param {ProfileService} profileService profile service
-   */
   constructor(
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
-    private readonly profileService: ProfileService,
-  ) {
-    this.expiration = this.configService.get("WEBTOKEN_EXPIRATION_TIME");
-  }
+    private readonly tokenService: TokensService,
+    private readonly userService: UsersService,
+  ) {}
 
-  /**
-   * Creates a signed jwt token based on IProfile payload
-   * @param {Profile} param dto to generate token from
-   * @returns {Promise<ITokenReturnBody>} token body
-   */
-  async createToken({
-    _id,
-    username,
-    email,
-    avatar,
-  }: IProfile): Promise<ITokenReturnBody> {
+  async registerUser(data: EmailRegisterDto) {
+    const user = await this.userService.create(data);
+    const tokens = await this.tokenService.generateAuthTokens(user);
     return {
-      expires: this.expiration,
-      expiresPrettyPrint: AuthService.prettyPrintSeconds(this.expiration),
-      token: this.jwtService.sign({ _id, username, email, avatar }),
+      user,
+      tokens,
     };
   }
 
-  /**
-   * Formats the time in seconds into human-readable format
-   * @param {string} time
-   * @returns {string} hrf time
-   */
-  private static prettyPrintSeconds(time: string): string {
-    const ntime = Number(time);
-    const hours = Math.floor(ntime / 3600);
-    const minutes = Math.floor((ntime % 3600) / 60);
-    const seconds = Math.floor((ntime % 3600) % 60);
-
-    return `${hours > 0 ? hours + (hours === 1 ? " hour," : " hours,") : ""} ${
-      minutes > 0 ? minutes + (minutes === 1 ? " minute" : " minutes") : ""
-    } ${seconds > 0 ? seconds + (seconds === 1 ? " second" : " seconds") : ""}`;
+  async emailLogin(data: EmailLoginDto) {
+    const user = await this.userService.verifyUser(data);
+    const tokens = await this.tokenService.generateAuthTokens(user);
+    return {
+      user,
+      tokens,
+    };
   }
 
-  /**
-   * Validates whether or not the profile exists in the database
-   * @param {LoginPayload} payload login payload to authenticate with
-   * @returns {Promise<IProfile>} registered profile
-   */
-  async validateUser(payload: LoginPayload): Promise<IProfile> {
-    const user = await this.profileService.getByUsernameAndPass(
-      payload.username,
-      payload.password,
+  async verifyEmail(verifyEmailToken) {
+    const verifyEmailTokenDoc = await this.tokenService.verifyToken(
+      verifyEmailToken,
+      TokenTypes.VERIFY_EMAIL,
     );
-    if (!user) {
-      throw new UnauthorizedException(
-        "Could not authenticate. Please try again.",
-      );
+    const user = await this.userService.getUser(verifyEmailTokenDoc._id);
+
+    await this.tokenService.deleteManyTokens(user.id, TokenTypes.VERIFY_EMAIL);
+    await this.userService.updateUser(user.id, { verified: true });
+  }
+
+  async decodeAccessToken(
+    accessToken: string,
+  ): Promise<any /*ResponseUsersDto*/> {
+    const decodedToken: any = await this.tokenService.verifyToken(
+      accessToken,
+      TokenTypes.ACCESS,
+    );
+    if (!decodedToken) {
+      throw new UnauthorizedException("UNAUTHORIZED");
     }
-    return user;
+    return decodedToken;
+  }
+
+  async logOut(refreshToken: string): Promise<ResponseLogOutDto> {
+    await this.tokenService.findAndRemoveRefreshToken(refreshToken);
+
+    return {
+      message: AuthMessage.LOGGED_OUT,
+    };
+  }
+
+  async refreshToken(refreshToken: string): Promise<ResponseRefreshTokenDto> {
+    const refreshTokenDoc = await this.tokenService.findAndRemoveRefreshToken(
+      refreshToken,
+    );
+    const userDoc = await this.userService.getUser(refreshTokenDoc._id);
+    const newTokens = await this.tokenService.generateAuthTokens(userDoc);
+    return {
+      user: userDoc.id,
+      tokens: newTokens,
+    };
   }
 }

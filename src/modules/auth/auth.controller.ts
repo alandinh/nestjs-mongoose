@@ -1,49 +1,97 @@
-import { Controller, Body, Post } from "@nestjs/common";
-import { ApiResponse, ApiTags } from "@nestjs/swagger";
-import { AuthService, ITokenReturnBody } from "./auth.service";
-import { LoginPayload } from "./payload/login.payload";
-import { RegisterPayload } from "./payload/register.payload";
-import { ProfileService } from "../profile/profile.service";
+import { Body, Controller, HttpStatus, Post } from "@nestjs/common";
+import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { AuthService } from "./auth.service";
+import { AuthMessage } from "./constants/auth-message.enum";
+import { EmailLoginDto } from "./dto/email-login.dto";
+import { EmailRegisterDto } from "./dto/email-register.dto";
+import {
+  LogOutDto,
+  RefreshTokenDto,
+  ResponseLogOutDto,
+  ResponseRefreshTokenDto,
+} from "./dto/refresh-token.dto";
+import { ResponseLogInDto } from "./dto/response-login.dto";
 
-/**
- * Authentication Controller
- */
-@Controller("api/auth")
-@ApiTags("authentication")
+@ApiTags("Auth")
+@Controller("auth")
 export class AuthController {
-  /**
-   * Constructor
-   * @param {AuthService} authService authentication service
-   * @param {ProfileService} profileService profile service
-   */
-  constructor(
-    private readonly authService: AuthService,
-    private readonly profileService: ProfileService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
-  /**
-   * Login route to validate and create tokens for users
-   * @param {LoginPayload} payload the login dto
-   */
-  @Post("login")
-  @ApiResponse({ status: 201, description: "Login Completed" })
-  @ApiResponse({ status: 400, description: "Bad Request" })
-  @ApiResponse({ status: 401, description: "Unauthorized" })
-  async login(@Body() payload: LoginPayload): Promise<ITokenReturnBody> {
-    const user = await this.authService.validateUser(payload);
-    return await this.authService.createToken(user);
+  @Post("register")
+  @ApiOperation({ summary: "Register with email and password" })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: AuthMessage.LOGGED_IN,
+    type: ResponseLogInDto,
+  })
+  async register(
+    @Body() registerDto: EmailRegisterDto,
+  ): Promise<ResponseLogInDto> {
+    return this.authService.registerUser(registerDto);
   }
 
-  /**
-   * Registration route to create and generate tokens for users
-   * @param {RegisterPayload} payload the registration dto
-   */
-  @Post("register")
-  @ApiResponse({ status: 201, description: "Registration Completed" })
-  @ApiResponse({ status: 400, description: "Bad Request" })
-  @ApiResponse({ status: 401, description: "Unauthorized" })
-  async register(@Body() payload: RegisterPayload): Promise<ITokenReturnBody> {
-    const user = await this.profileService.create(payload);
-    return await this.authService.createToken(user);
+  @Post("login")
+  @ApiOperation({ summary: "Loggin with email and password" })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: AuthMessage.LOGGED_IN,
+    type: ResponseLogInDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: AuthMessage.LOGGIN_FAILED,
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: AuthMessage.LOGGIN_FAILED,
+  })
+  async logIn(@Body() logInDto: EmailLoginDto): Promise<ResponseLogInDto> {
+    return this.authService.emailLogin(logInDto);
+  }
+
+  @Post("logout")
+  @ApiOperation({ summary: `Log out and remove refresh token` })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: AuthMessage.LOGGED_OUT,
+    type: ResponseLogOutDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: AuthMessage.REFRESH_TOKEN_NOT_FOUND,
+  })
+  async logOut(@Body() logOutDto: LogOutDto): Promise<ResponseLogOutDto> {
+    return this.authService.logOut(logOutDto.refreshToken);
+  }
+
+  @Post("refresh-tokens")
+  @ApiOperation({ summary: `get a new access and refresh token` })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: AuthMessage.REFRESHED_TOKEN_OK,
+    type: ResponseRefreshTokenDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: AuthMessage.REFRESH_TOKEN_NOT_FOUND,
+  })
+  async refreshToken(
+    @Body() refreshTokenDto: RefreshTokenDto,
+  ): Promise<ResponseRefreshTokenDto> {
+    return this.authService.refreshToken(refreshTokenDto.refreshToken);
+  }
+
+  @Post("verify-email")
+  @ApiOperation({ summary: "Verify Email" })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: AuthMessage.VERIFIED_EMAIL,
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: AuthMessage.VERIFIED_EMAIL_FAILED,
+  })
+  async verifyEmail(@Body() verifyEmailToken: string) {
+    return this.authService.verifyEmail(verifyEmailToken);
   }
 }
